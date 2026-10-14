@@ -24,6 +24,8 @@ limitations under the License.
 //     removes only the endpoint's own targets
 //   - set identifiers, which TransIP cannot store, are dropped from the desired
 //     endpoints so they match the records read back
+//   - every API call has a timeout, so an unreachable API is an error and not a
+//     call that hangs until ExternalDNS gives up and exits
 package transip
 
 import (
@@ -34,6 +36,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/transip/gotransip/v6"
@@ -75,8 +78,9 @@ type Provider struct {
 }
 
 // New creates a TransIP provider that authenticates with the private key of
-// the given account.
-func New(accountName, privateKeyFile string, domainFilter *endpoint.DomainFilter, dryRun bool) (*Provider, error) {
+// the given account. Every TransIP API call, the token request included, gives
+// up after timeout.
+func New(accountName, privateKeyFile string, timeout time.Duration, domainFilter *endpoint.DomainFilter, dryRun bool) (*Provider, error) {
 	if accountName == "" {
 		return nil, errors.New("TransIP account name not set")
 	}
@@ -85,16 +89,28 @@ func New(accountName, privateKeyFile string, domainFilter *endpoint.DomainFilter
 		return nil, errors.New("TransIP private key file not set")
 	}
 
+	if timeout <= 0 {
+		return nil, errors.New("TransIP timeout must be positive")
+	}
+
 	apiMode := gotransip.APIModeReadWrite
 	if dryRun {
 		apiMode = gotransip.APIModeReadOnly
 	}
 
-	client, err := gotransip.NewClient(gotransip.ClientConfiguration{
+	return newWithConfiguration(gotransip.ClientConfiguration{
 		AccountName:    accountName,
 		PrivateKeyPath: privateKeyFile,
 		Mode:           apiMode,
-	})
+		// gotransip falls back on http.DefaultClient, which never gives up. A
+		// call that hangs then outlasts the HTTP client timeout of ExternalDNS,
+		// which exits on it; an error here is a 500, which it retries.
+		HTTPClient: &http.Client{Timeout: timeout},
+	}, domainFilter, dryRun)
+}
+
+func newWithConfiguration(configuration gotransip.ClientConfiguration, domainFilter *endpoint.DomainFilter, dryRun bool) (*Provider, error) {
+	client, err := gotransip.NewClient(configuration)
 	if err != nil {
 		return nil, fmt.Errorf("could not setup TransIP API client: %w", err)
 	}

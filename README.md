@@ -18,6 +18,11 @@ a sidecar of ExternalDNS that holds the TransIP credentials and does the API cal
   name and type in both cases.
 - **No set identifiers.** TransIP cannot store one, so an endpoint that has one never matched its
   own record and was created again on every sync. They are dropped in `AdjustEndpoints`.
+- **API calls time out.** The in-tree provider used Go's default HTTP client, which never gives
+  up. When the TransIP API did not answer, `/records` outlasted the 15 seconds ExternalDNS waits
+  for its webhook (`--webhook-provider-read-timeout` plus `--webhook-provider-write-timeout`), and
+  ExternalDNS exited. Now every call gives up after `--transip-timeout`, and the error is retried
+  like any other (below).
 - **API errors are retried.** Every error becomes an HTTP 500, which ExternalDNS treats as a soft
   error: it logs it and tries again on the next sync, where the in-tree provider made it exit.
 
@@ -32,6 +37,7 @@ Every flag has an environment variable as its default.
 |------|-------------|---------|---------|
 | `--transip-account` | `TRANSIP_ACCOUNT` | | TransIP account name |
 | `--transip-keyfile` | `TRANSIP_KEYFILE` | | path to the private key of the account |
+| `--transip-timeout` | `TRANSIP_TIMEOUT` | `5s` | give up on a TransIP API call after this long |
 | `--domain-filter` | `DOMAIN_FILTER` | all zones | zone to manage, can be repeated |
 | `--dry-run` | `DRY_RUN` | `false` | log the changes, apply none |
 | `--listen-address` | `LISTEN_ADDRESS` | `127.0.0.1:8888` | webhook API |
