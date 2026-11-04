@@ -319,7 +319,7 @@ func TestAdjustEndpoints(t *testing.T) {
 // them.
 func syncOnce(t *testing.T, p *Provider, policy plan.Policy, desired ...*endpoint.Endpoint) *plan.Changes {
 	t.Helper()
-	managed := []string{endpoint.RecordTypeA, endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME, endpoint.RecordTypeTXT}
+	managed := []string{endpoint.RecordTypeA, endpoint.RecordTypeAAAA, endpoint.RecordTypeCNAME, endpoint.RecordTypeTXT, endpoint.RecordTypeNS, endpoint.RecordTypeMX, endpoint.RecordTypeSRV}
 
 	registry, err := txt.New(&externaldns.Config{TXTOwnerID: "default", ManagedDNSRecordTypes: managed}, p)
 	if err != nil {

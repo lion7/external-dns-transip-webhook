@@ -57,6 +57,20 @@ const (
 	apexName = "@"
 )
 
+// supportedRecordTypes are the types that both TransIP and ExternalDNS know.
+// The default list of ExternalDNS (provider.SupportedRecordType) has no MX, so
+// with it an existing MX record was never read back and a desired one was
+// created again on every sync.
+var supportedRecordTypes = []string{
+	endpoint.RecordTypeA,
+	endpoint.RecordTypeAAAA,
+	endpoint.RecordTypeCNAME,
+	endpoint.RecordTypeMX,
+	endpoint.RecordTypeNS,
+	endpoint.RecordTypeSRV,
+	endpoint.RecordTypeTXT,
+}
+
 // DNSRepository is the part of the TransIP domain repository the provider uses.
 type DNSRepository interface {
 	GetAll() ([]domain.Domain, error)
@@ -149,6 +163,15 @@ func (p *Provider) AdjustEndpoints(endpoints []*endpoint.Endpoint) ([]*endpoint.
 		if ep.RecordTTL.IsConfigured() && ep.RecordTTL < defaultTTL {
 			ep.RecordTTL = defaultTTL
 		}
+
+		// ExternalDNS strips the trailing dot of the targets it reads back,
+		// except for SRV, so a desired SRV target has to carry the dot that
+		// TransIP stores, or it is an update on every sync
+		if ep.RecordType == endpoint.RecordTypeSRV {
+			for i, target := range ep.Targets {
+				ep.Targets[i] = contentForTarget(ep.RecordType, target)
+			}
+		}
 	}
 
 	return endpoints, nil
@@ -177,7 +200,7 @@ func (p *Provider) Records(_ context.Context) ([]*endpoint.Endpoint, error) {
 		var order []recordSet
 		sets := map[recordSet][]domain.DNSEntry{}
 		for _, r := range entries {
-			if !provider.SupportedRecordType(r.Type) {
+			if !slices.Contains(supportedRecordTypes, r.Type) {
 				continue
 			}
 
@@ -525,20 +548,38 @@ func dnsEntriesForEndpoint(ep *endpoint.Endpoint, zoneName string) []domain.DNSE
 
 	entries := []domain.DNSEntry{}
 	for _, target := range ep.Targets {
-		// external hostnames require a trailing dot in TransIP API
-		if ep.RecordType == endpoint.RecordTypeCNAME {
-			target = provider.EnsureTrailingDot(target)
-		}
-
 		entries = append(entries, domain.DNSEntry{
 			Name:    recordNameForEndpoint(ep, zoneName),
 			Expire:  ttl,
 			Type:    ep.RecordType,
-			Content: target,
+			Content: contentForTarget(ep.RecordType, target),
 		})
 	}
 
 	return entries
+}
+
+// contentForTarget returns the target as TransIP stores it. TransIP takes a
+// host name without a trailing dot as relative to the zone ("mail" is
+// mail.example.org), so the host name of a CNAME, NS, MX or SRV target gets
+// one. The hosts ExternalDNS sends are always fully qualified; it strips the
+// trailing dot from every target it reads back, so the records match.
+func contentForTarget(recordType, target string) string {
+	switch recordType {
+	case endpoint.RecordTypeCNAME, endpoint.RecordTypeNS:
+		return provider.EnsureTrailingDot(target)
+	case endpoint.RecordTypeMX, endpoint.RecordTypeSRV:
+		// "10 mail.example.org" and "10 20 5060 sip.example.org": the host
+		// is the last field
+		fields := strings.Fields(target)
+		if len(fields) < 2 {
+			return target
+		}
+		fields[len(fields)-1] = provider.EnsureTrailingDot(fields[len(fields)-1])
+		return strings.Join(fields, " ")
+	default:
+		return target
+	}
 }
 
 // zoneNameForDNSName returns the most specific zone the given name is in, or
