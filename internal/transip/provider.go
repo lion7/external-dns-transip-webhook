@@ -72,6 +72,10 @@ type Provider struct {
 	domainFilter *endpoint.DomainFilter
 	dryRun       bool
 
+	// the zones listed by the last Records call, for the ApplyChanges of the
+	// same sync
+	syncZones []string
+
 	// ExternalDNS calls the provider from one goroutine, but nothing in the
 	// webhook protocol guarantees that
 	mu sync.Mutex
@@ -159,6 +163,7 @@ func (p *Provider) Records(_ context.Context) ([]*endpoint.Endpoint, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	p.syncZones = nil
 	zones, err := p.zones()
 	if err != nil {
 		return nil, err
@@ -203,6 +208,8 @@ func (p *Provider) Records(_ context.Context) ([]*endpoint.Endpoint, error) {
 		}
 	}
 
+	p.syncZones = zones
+
 	return endpoints, nil
 }
 
@@ -216,9 +223,17 @@ func (p *Provider) ApplyChanges(_ context.Context, changes *plan.Changes) error 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	zones, err := p.zones()
-	if err != nil {
-		return err
+	// ExternalDNS reads the records right before it applies changes, so the
+	// zones listed then are current; listing the domains again would spend one
+	// more call of the TransIP budget. Each list is used once, so the next sync
+	// lists them again.
+	zones := p.syncZones
+	p.syncZones = nil
+	if zones == nil {
+		var err error
+		if zones, err = p.zones(); err != nil {
+			return err
+		}
 	}
 
 	// the DNS entries of every zone that gets updated, fetched once

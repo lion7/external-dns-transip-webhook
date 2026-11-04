@@ -25,6 +25,8 @@ a sidecar of ExternalDNS that holds the TransIP credentials and does the API cal
   like any other (below).
 - **API errors are retried.** Every error becomes an HTTP 500, which ExternalDNS treats as a soft
   error: it logs it and tries again on the next sync, where the in-tree provider made it exit.
+- **The domain list is fetched once per sync.** The in-tree provider listed the account's domains
+  on the read and again on the apply. The apply now uses the list of the read before it.
 
 A name and type is owned as a whole: an update replaces all entries of that record set, also the
 ones that were added by hand.
@@ -47,6 +49,15 @@ Every flag has an environment variable as its default.
 
 `DOMAIN_FILTER` is a comma separated list. The webhook API has no authentication, keep it on
 localhost.
+
+### TransIP API budget
+
+A TransIP account may make 1000 API calls per rolling hour, shared by everything that uses the
+account, and the API answers `429 Too many requests` beyond that. Each sync reads every managed
+zone, one call per zone, and the list of domains is one more; each changed entry adds a call. With
+8 zones and the default sync interval of one minute that is about 540 calls an hour when nothing
+changes. Raise `--interval` of ExternalDNS, or narrow `--domain-filter`, when the account has many
+zones.
 
 ### Dry run
 

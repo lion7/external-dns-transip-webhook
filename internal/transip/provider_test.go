@@ -21,6 +21,7 @@ type fakeRepository struct {
 	zones   map[string][]domain.DNSEntry
 	added   []domain.DNSEntry
 	removed []domain.DNSEntry
+	listed  int
 }
 
 func newFakeRepository(zoneName string, entries ...domain.DNSEntry) *fakeRepository {
@@ -28,6 +29,7 @@ func newFakeRepository(zoneName string, entries ...domain.DNSEntry) *fakeReposit
 }
 
 func (r *fakeRepository) GetAll() ([]domain.Domain, error) {
+	r.listed++
 	var domains []domain.Domain
 	for name := range r.zones {
 		domains = append(domains, domain.Domain{Name: name})
